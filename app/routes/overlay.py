@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 import requests
-
+from app.services.obs_settings import obs_settings
 from app.services.overlay_service import (
     normalize,
     get_overlay_payload,
@@ -10,6 +10,8 @@ from app.services.overlay_service import (
     send_preview_fields_to_obs,
     show_advertisement_scene,
     clear_overlay_text,
+    start_countdown_timer,
+    stop_countdown_timer,
 )
 
 router = APIRouter(prefix="/overlay", tags=["Overlay"])
@@ -59,7 +61,11 @@ def overlay_start(body: OverlayRequest):
     try:
         session_id = normalize(body.sessionId)
         detail_id  = normalize(body.detailId)
-
+        if not obs_settings.is_connected:
+         raise HTTPException(
+        status_code=400,
+        detail="OBS not connected. Please open browser and connect OBS first."
+            )
         if not session_id or not detail_id:
             raise HTTPException(
                 status_code=400,
@@ -78,17 +84,25 @@ def overlay_start(body: OverlayRequest):
             talk_topic=payload["talkTopic"],
             conference_name=payload["conferenceName"]
         )
+        # Start countdown based on talk duration
+        start_countdown_timer(
+            duration_value=payload["currentDetail"].get("time"),
+            session_id=session_id,
+            detail_id=detail_id
+        )
 
         return {
-            "success": True,
-            "message": "Overlay sent to OBS and switched to overlay scene",
-            "data": {
-                "sessionId":    session_id,
-                "detailId":     detail_id,
-                "overlayText":  payload["overlayText"],
-                "nextTalkText": payload["nextTalkText"],
-            }
-        }
+    "success": True,
+    "message": "Overlay sent to OBS and switched to overlay scene",
+    "data": {
+        "sessionId": session_id,
+        "detailId": detail_id,
+        "speakerName": payload["speakerName"],
+        "talkTopic": payload["talkTopic"],
+        "conferenceName": payload["conferenceName"],
+        "duration": payload["currentDetail"].get("time"),
+    }
+}
 
 
     except HTTPException:
@@ -111,7 +125,11 @@ def overlay_preview(body: OverlayRequest):
     try:
         session_id = normalize(body.sessionId)
         detail_id  = normalize(body.detailId)
-
+        if not obs_settings.is_connected:
+         raise HTTPException(
+            status_code=400,
+            detail="OBS not connected. Please connect first."
+        )
         if not session_id or not detail_id:
             raise HTTPException(
                 status_code=400,
@@ -152,20 +170,21 @@ def overlay_preview(body: OverlayRequest):
 
 @router.post("/end")
 def overlay_end(body: EndRequest):
-    """
-    Called when a talk is ENDED from the Angular control panel.
-    Switches OBS to the AdvertisementScene automatically.
-    sessionId / detailId are accepted but not needed for scene switch.
-    """
+    if not obs_settings.is_connected:
+     raise HTTPException(
+        status_code=400,
+        detail="OBS not connected"
+    )
     try:
+        stop_countdown_timer(clear_text=True)
         show_advertisement_scene()
+
         return {
             "success": True,
-            "message": "OBS switched to advertisement scene"
+            "message": "OBS switched to advertisement scene and countdown stopped"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.post("/clear")
 def overlay_clear():
@@ -173,6 +192,11 @@ def overlay_clear():
     Blanks out all OBS text sources without switching scenes.
     Useful for clearing stale text between sessions.
     """
+    if not obs_settings.is_connected:
+     raise HTTPException(
+        status_code=400,
+        detail="OBS not connected"
+    )
     try:
         clear_overlay_text()
         return {

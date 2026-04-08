@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OBS Overlay Connector</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #0f172a;
+      color: white;
+      margin: 0;
+      padding: 40px;
+    }
+
+    .container {
+      max-width: 600px;
+      margin: auto;
+      background: #1e293b;
+      padding: 30px;
+      border-radius: 16px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+    }
+
+    h1 {
+      margin-top: 0;
+      font-size: 28px;
+    }
+
+    .field {
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: bold;
+    }
+
+    input {
+      width: 100%;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid #475569;
+      background: #0f172a;
+      color: white;
+      font-size: 15px;
+      box-sizing: border-box;
+    }
+
+    button {
+      background: #22c55e;
+      border: none;
+      color: white;
+      padding: 12px 18px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    button:hover {
+      background: #16a34a;
+    }
+
+    .status {
+      margin-top: 20px;
+      padding: 12px;
+      border-radius: 10px;
+      font-weight: bold;
+      display: none;
+    }
+
+    .success {
+      background: rgba(34, 197, 94, 0.2);
+      color: #86efac;
+      border: 1px solid #22c55e;
+    }
+
+    .error {
+      background: rgba(239, 68, 68, 0.2);
+      color: #fca5a5;
+      border: 1px solid #ef4444;
+    }
+
+    .info-box {
+      margin-top: 25px;
+      padding: 14px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      line-height: 1.6;
+    }
+
+    code {
+      color: #93c5fd;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>OBS Overlay Connector</h1>
+    <p>Enter OBS WebSocket details below and connect your OBS.</p>
+
+    <div class="field">
+      <label for="host">OBS IP / Host</label>
+      <input id="host" type="text" placeholder="e.g. 192.168.1.18" value="{{ settings.host or '' }}" />
+    </div>
+
+    <div class="field">
+      <label for="port">OBS Port</label>
+      <input id="port" type="number" placeholder="4455" value="{{ settings.port or 4455 }}" />
+    </div>
+
+    <div class="field">
+      <label for="password">OBS Password</label>
+      <input id="password" type="password" placeholder="Enter OBS WebSocket password" />
+    </div>
+
+    <button onclick="connectOBS()">Connect OBS</button>
+
+    <div id="statusBox" class="status"></div>
+
+    <div class="info-box">
+      <strong>After connection:</strong><br>
+      Your existing routes will work normally:<br>
+      <code>POST /overlay/start</code><br>
+      <code>POST /overlay/preview</code><br>
+      <code>POST /overlay/end</code><br>
+      <code>POST /overlay/clear</code>
+    </div>
+  </div>
+
+  <script>
+    async function connectOBS() {
+      const host = document.getElementById("host").value.trim();
+      const port = parseInt(document.getElementById("port").value, 10);
+      const password = document.getElementById("password").value.trim();
+
+      const statusBox = document.getElementById("statusBox");
+      statusBox.style.display = "block";
+      statusBox.className = "status";
+      statusBox.innerText = "Connecting...";
+
+      try {
+        const response = await fetch("/connect-obs", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ host, port, password })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.detail || "Connection failed");
+        }
+
+        statusBox.classList.add("success");
+        statusBox.innerText = data.message;
+      } catch (error) {
+        statusBox.classList.add("error");
+        statusBox.innerText = error.message || "Something went wrong";
+      }
+    }
+  </script>
+</body>
+</html>

@@ -1,16 +1,14 @@
 from typing import Optional, Dict, Any, List
 import requests
 from obsws_python import ReqClient
-
+import threading
+import time
+from app.services.obs_settings import obs_settings
 # =========================
 # CONFIG
 # =========================
 
 BASE_URL = "https://nntr.in/api/api/Conference"
-
-OBS_HOST = "192.168.1.7"
-OBS_PORT = 4455
-OBS_PASSWORD = "29kPOoAi6qZGjFv6"
 
 OVERLAY_SCENE_NAME = "ConferenceOverlayScene"
 ADVERTISEMENT_SCENE_NAME = "AdvertisementScene"
@@ -20,10 +18,15 @@ SPEAKER_TEXT_SOURCE_NAME = "SpeakerNameText"
 TOPIC_TEXT_SOURCE_NAME = "TalkTopicText"
 CONFERENCE_TEXT_SOURCE_NAME = "ConferenceNameText"
 COUNTDOWN_TEXT_SOURCE_NAME = "CountdownText"   # optional / manual
+BUZZER_SOURCE_NAME = "BuzzerSource"
+TIME_UP_TEXT = "TIME'S UP"
 # API endpoints
 GET_ALL_SESSIONS_ENDPOINT = f"{BASE_URL}/GetSession"
 GET_SESSION_BY_ID_ENDPOINT = f"{BASE_URL}/Get-Session"
-
+timer_thread = None
+timer_stop_event = threading.Event()
+timer_lock = threading.Lock()
+active_timer_key = None
 def build_overlay_fields(
     session: Dict[str, Any],
     current_detail: Dict[str, Any],
@@ -83,13 +86,8 @@ def send_preview_fields_to_obs(
 # =========================
 
 def obs_client() -> ReqClient:
-    """Create a fresh OBS WebSocket client per request."""
-    return ReqClient(
-        host=OBS_HOST,
-        port=OBS_PORT,
-        password=OBS_PASSWORD,
-        timeout=5
-    )
+    """Create OBS WebSocket client using runtime settings entered by user."""
+    return obs_settings.create_client()
 
 
 def safe_get(url: str, timeout: int = 15) -> Dict[str, Any]:
@@ -301,6 +299,8 @@ def show_advertisement_scene() -> None:
 
 
 def clear_overlay_text() -> None:
+    stop_countdown_timer(clear_text=True)
+
     try:
         set_obs_text(SPEAKER_TEXT_SOURCE_NAME, "")
     except Exception:
@@ -321,6 +321,7 @@ def clear_overlay_text() -> None:
     except Exception:
         pass
 
+    hide_buzzer_source()
 # =========================
 # MAIN BUSINESS LOGIC
 # =========================
@@ -367,3 +368,143 @@ def get_overlay_payload(
         "talkTopic": overlay_fields["talkTopic"],
         "conferenceName": overlay_fields["conferenceName"],
 }
+
+def duration_to_seconds(value: Optional[str]) -> int:
+    """
+    Convert HH:MM:SS into total seconds.
+    Example: 00:10:00 -> 600
+    """
+    if not value:
+        return 0
+
+    try:
+        parts = str(value).split(":")
+        hours = int(parts[0]) if len(parts) > 0 else 0
+        minutes = int(parts[1]) if len(parts) > 1 else 0
+        seconds = int(parts[2]) if len(parts) > 2 else 0
+        return hours * 3600 + minutes * 60 + seconds
+    except Exception:
+        return 0
+
+
+def format_countdown(seconds: int) -> str:
+    if seconds < 0:
+        seconds = 0
+
+    mins = seconds // 60
+    secs = seconds % 60
+    return f"{mins:02d}:{secs:02d}"
+
+def set_scene_item_visibility(scene_name: str, source_name: str, visible: bool) -> None:
+    client = obs_client()
+    item = client.get_scene_item_id(scene_name=scene_name, source_name=source_name)
+    client.set_scene_item_enabled(
+        scene_name=scene_name,
+        scene_item_id=item.scene_item_id,
+        enabled=visible
+    )
+
+
+def show_buzzer_source() -> None:
+    try:
+        set_scene_item_visibility(OVERLAY_SCENE_NAME, BUZZER_SOURCE_NAME, True)
+    except Exception:
+        pass
+
+
+def hide_buzzer_source() -> None:
+    try:
+        set_scene_item_visibility(OVERLAY_SCENE_NAME, BUZZER_SOURCE_NAME, False)
+    except Exception:
+        pass
+
+
+def stop_countdown_timer(clear_text: bool = True) -> None:
+    global timer_thread, active_timer_key
+
+    with timer_lock:
+        timer_stop_event.set()
+        active_timer_key = None
+
+    if clear_text:
+        try:
+            set_obs_text(COUNTDOWN_TEXT_SOURCE_NAME, "")
+        except Exception:
+            pass
+
+    hide_buzzer_source()
+
+
+def _countdown_worker(total_seconds: int, timer_key: str) -> None:
+    """
+    Internal worker thread:
+    - updates CountdownText every second
+    - when reaches zero, shows TIME'S UP and buzzer
+    """
+    try:
+        hide_buzzer_source()
+
+        remaining = total_seconds
+
+        while remaining >= 0:
+            if timer_stop_event.is_set():
+                return
+
+            with timer_lock:
+                if active_timer_key != timer_key:
+                    return
+
+            if remaining == 0:
+                set_obs_text(COUNTDOWN_TEXT_SOURCE_NAME, TIME_UP_TEXT)
+                show_buzzer_source()
+
+                # buzzer 5 sec ke liye visible rakho
+                for _ in range(5):
+                    if timer_stop_event.is_set():
+                        hide_buzzer_source()
+                        return
+                    time.sleep(1)
+
+                hide_buzzer_source()
+                return
+
+            set_obs_text(COUNTDOWN_TEXT_SOURCE_NAME, format_countdown(remaining))
+            time.sleep(1)
+            remaining -= 1
+
+    except Exception as e:
+        print(f"Countdown worker error: {e}")
+
+
+def start_countdown_timer(duration_value: Optional[str], session_id: str, detail_id: str) -> None:
+    """
+    Starts a fresh countdown for current talk duration.
+    Stops any old running timer first.
+    """
+    global timer_thread, active_timer_key
+
+    total_seconds = duration_to_seconds(duration_value)
+
+    # fallback: agar duration invalid ho
+    if total_seconds <= 0:
+        try:
+            set_obs_text(COUNTDOWN_TEXT_SOURCE_NAME, "00:00")
+        except Exception:
+            pass
+        return
+
+    stop_countdown_timer(clear_text=False)
+    timer_stop_event.clear()
+    hide_buzzer_source()
+
+    timer_key = f"{session_id}__{detail_id}"
+
+    with timer_lock:
+        active_timer_key = timer_key
+
+    timer_thread = threading.Thread(
+        target=_countdown_worker,
+        args=(total_seconds, timer_key),
+        daemon=True
+    )
+    timer_thread.start()

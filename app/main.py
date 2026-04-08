@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes.overlay import router as overlay_router
-
+from app.routes.ui import router as ui_router
 app = FastAPI(
     title="OBS Overlay API",
     version="1.0.0",
@@ -16,6 +16,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# HTML UI
+app.include_router(ui_router)
 
 # All overlay routes are at /overlay/*
 app.include_router(overlay_router)
