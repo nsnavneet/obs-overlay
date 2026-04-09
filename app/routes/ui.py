@@ -30,14 +30,19 @@ class OBSConnectRequest(BaseModel):
 
 @router.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    settings = obs_settings.get_settings()
-    return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
-            "settings": settings
-        }
-    )
+    try:
+        settings = obs_settings.get_settings()
+        return templates.TemplateResponse(
+            "index.html",
+            {
+                "request": request,
+                "settings": settings
+            }
+        )
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        return HTMLResponse(content=f"<h1>Error</h1><pre>{error_details}</pre>", status_code=500)
 
 
 @router.post("/connect-obs")
