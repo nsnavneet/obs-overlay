@@ -3,3 +3,4 @@ uvicorn
 requests
 obsws-python
 python-multipart
+jinja2
