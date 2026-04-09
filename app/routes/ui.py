@@ -13,11 +13,12 @@ router = APIRouter(tags=["UI"])
 def get_base_path():
     if getattr(sys, "frozen", False):
         return sys._MEIPASS
-    return os.path.abspath(".")
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(current_dir)
 
 
 BASE_PATH = get_base_path()
-TEMPLATES_DIR = os.path.join(BASE_PATH, "app", "templates")
+TEMPLATES_DIR = os.path.join(BASE_PATH, "templates")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 
