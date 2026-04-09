@@ -33,11 +33,9 @@ def home(request: Request):
     try:
         settings = obs_settings.get_settings()
         return templates.TemplateResponse(
-            "index.html",
-            {
-                "request": request,
-                "settings": settings
-            }
+            request=request,
+            name="index.html",
+            context={"settings": settings}
         )
     except Exception as e:
         import traceback
